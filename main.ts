@@ -1,85 +1,52 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, requestUrl } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+// Defines the structure for a single voice from the API
+interface Voice {
+	Name: string;
+	DisplayName: string;
+	LocalName: string;
+	ShortName: string;
+	Gender: string;
+	Locale: string;
+	SampleRateHertz: string;
+	VoiceType: string;
+	Status: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+// Settings interface for our plugin
+interface AzureTTSSettings {
+	subscriptionKey: string;
+	serviceRegion: string;
+	voiceName: string;
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+// Default settings
+const DEFAULT_SETTINGS: AzureTTSSettings = {
+	subscriptionKey: '',
+	serviceRegion: 'eastasia',
+	voiceName: 'zh-CN-XiaoxiaoNeural' // A default voice
+}
+
+export default class AzureTTSPlugin extends Plugin {
+	settings: AzureTTSSettings;
+	voiceList: Voice[] = [];
+	private audio: HTMLAudioElement | null = null;
+	private statusBarItem: HTMLElement | null = null;
+	private playPauseButton: HTMLButtonElement | null = null;
+
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		// Add a ribbon icon to trigger the reading
+		this.addRibbonIcon('audio-file', 'Azure TTS Read Aloud', () => this.triggerReading());
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, _view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		// Add the settings tab
+		this.addSettingTab(new AzureTTSSettingTab(this.app, this));
 	}
 
 	onunload() {
-
+		this.stopReading();
 	}
 
 	async loadSettings() {
@@ -89,46 +56,232 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	triggerReading() {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view) {
+			new Notice('No active editor. Please open a note.');
+			return;
+		}
+
+		const editor = view.editor;
+		const fullText = editor.getValue();
+		let textToRead = '';
+
+		const selection = editor.getSelection();
+		if (selection) {
+			// If text is selected, read from the start of selection to the end of the document
+			const startIndex = fullText.indexOf(selection);
+			textToRead = fullText.substring(startIndex);
+		} else {
+			// If no text is selected, read from the cursor to the end of the document
+			const cursorOffset = editor.posToOffset(editor.getCursor());
+			textToRead = fullText.substring(cursorOffset);
+		}
+
+		if (textToRead.trim()) {
+			this.startReading(textToRead);
+		} else {
+			new Notice('No text to read from the current position.');
+		}
+	}
+
+	async getVoiceList(): Promise<Voice[]> {
+		if (!this.settings.subscriptionKey || !this.settings.serviceRegion) {
+			throw new Error('Subscription key or region is not set.');
+		}
+
+		const url = `https://${this.settings.serviceRegion}.tts.speech.microsoft.com/cognitiveservices/voices/list`;
+		const response = await requestUrl({
+			url,
+			method: 'GET',
+			headers: {
+				'Ocp-Apim-Subscription-Key': this.settings.subscriptionKey,
+			}
+		});
+
+		if (response.status !== 200) {
+			throw new Error(`Failed to fetch voice list. Status: ${response.status}. Body: ${response.text}`);
+		}
+
+		return response.json as Voice[];
+	}
+
+	stopReading() {
+		if (this.audio) {
+			this.audio.pause();
+			URL.revokeObjectURL(this.audio.src);
+			this.audio = null;
+		}
+		if (this.statusBarItem) {
+			this.statusBarItem.remove();
+			this.statusBarItem = null;
+			this.playPauseButton = null;
+		}
+	}
+
+	setupStatusBarControls() {
+		if (!this.audio) return;
+
+		this.statusBarItem = this.addStatusBarItem();
+		this.statusBarItem.empty();
+
+		this.playPauseButton = this.statusBarItem.createEl('button', { text: 'Pause' });
+		this.playPauseButton.onclick = () => {
+			if (this.audio?.paused) {
+				this.audio.play();
+			} else {
+				this.audio?.pause();
+			}
+		};
+
+		const stopButton = this.statusBarItem.createEl('button', { text: 'Stop' });
+		stopButton.onclick = () => {
+			this.stopReading();
+			new Notice('Playback stopped.');
+		};
+
+		this.audio.onplay = () => {
+			if (this.playPauseButton) this.playPauseButton.setText('Pause');
+		};
+
+		this.audio.onpause = () => {
+			if (this.playPauseButton) this.playPauseButton.setText('Resume');
+		};
+
+		this.audio.onended = () => {
+			this.stopReading();
+			new Notice('Finished reading.');
+		};
+	}
+
+
+	async startReading(text: string) {
+		this.stopReading(); // Stop any previous playback
+
+		if (!this.settings.subscriptionKey || !this.settings.serviceRegion) {
+			new Notice('Azure TTS settings are not configured.');
+			return;
+		}
+
+		try {
+			new Notice('Synthesizing speech...');
+			const url = `https://${this.settings.serviceRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+			const ssml = `
+                <speak version='1.0' xml:lang='${this.settings.voiceName.substring(0, 5)}'>
+                    <voice xml:lang='${this.settings.voiceName.substring(0, 5)}' name='${this.settings.voiceName}'>
+                        ${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    </voice>
+                </speak>`;
+
+			const response = await requestUrl({
+				url,
+				method: 'POST',
+				headers: {
+					'Ocp-Apim-Subscription-Key': this.settings.subscriptionKey,
+					'Content-Type': 'application/ssml+xml',
+					'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3',
+					'User-Agent': 'ObsidianAzureTTSPlugin'
+				},
+				body: ssml
+			});
+
+			if (response.status !== 200) {
+				throw new Error(`Failed to synthesize speech. Status: ${response.status}. Body: ${response.text}`);
+			}
+
+			const audioData = response.arrayBuffer;
+			const blob = new Blob([audioData], { type: 'audio/mpeg' });
+			const audioUrl = URL.createObjectURL(blob);
+
+			this.audio = new Audio(audioUrl);
+			this.setupStatusBarControls();
+			this.audio.play();
+
+		} catch (e) {
+			console.error("Azure TTS Error:", e);
+			new Notice("Failed to synthesize speech. Check console for details.");
+			this.stopReading();
+		}
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+// Settings Tab implementation
+class AzureTTSSettingTab extends PluginSettingTab {
+	plugin: AzureTTSPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: AzureTTSPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
+		containerEl.createEl('h2', { text: 'Azure Text-to-Speech Settings' });
+
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('Subscription Key')
+			.setDesc('Enter your Azure Speech Service subscription key.')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('Enter your key')
+				.setValue(this.plugin.settings.subscriptionKey)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.subscriptionKey = value.trim();
 					await this.plugin.saveSettings();
 				}));
+
+		new Setting(containerEl)
+			.setName('Service Region')
+			.setDesc('Enter your Azure Speech Service region (e.g., eastus, eastasia).')
+			.addText(text => text
+				.setPlaceholder('Enter your region')
+				.setValue(this.plugin.settings.serviceRegion)
+				.onChange(async (value) => {
+					this.plugin.settings.serviceRegion = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		const validationSetting = new Setting(containerEl)
+			.setName('Validate and Fetch Voices')
+			.setDesc('Click to validate your credentials and fetch the available voices.')
+			.addButton(button => {
+				button
+					.setButtonText('Validate and Fetch')
+					.onClick(async () => {
+						button.setDisabled(true).setButtonText('Validating...');
+						try {
+							this.plugin.voiceList = await this.plugin.getVoiceList();
+							new Notice('Successfully validated and fetched voice list!');
+							// Re-render the settings tab to show the voice dropdown
+							this.display();
+						} catch (e) {
+							console.error(e);
+							new Notice('Validation failed. Please check your key/region and console for details.');
+							button.setDisabled(false).setButtonText('Validate and Fetch');
+						}
+					});
+			});
+
+		if (this.plugin.voiceList.length > 0) {
+			new Setting(containerEl)
+				.setName('Voice')
+				.setDesc('Select the voice to use for text-to-speech.')
+				.addDropdown(dropdown => {
+					this.plugin.voiceList.forEach(voice => {
+						dropdown.addOption(voice.ShortName, `${voice.DisplayName} (${voice.Locale})`);
+					});
+					dropdown
+						.setValue(this.plugin.settings.voiceName)
+						.onChange(async (value) => {
+							this.plugin.settings.voiceName = value;
+							await this.plugin.saveSettings();
+						});
+				});
+		} else {
+			validationSetting.setDesc('Click to validate your credentials and fetch the available voices. You must do this before you can select a voice.');
+		}
 	}
 }

@@ -279,18 +279,6 @@ export default class AzureTTSPlugin extends Plugin {
 	}
 
 	triggerReading() {
-		// If native TTS is playing, toggle pause/resume
-		if (this.isNativePlaying && this.currentUtterance) {
-			if (window.speechSynthesis.paused) {
-				window.speechSynthesis.resume();
-				new Notice('Resumed');
-			} else if (window.speechSynthesis.speaking) {
-				window.speechSynthesis.pause();
-				new Notice('Paused');
-			}
-			return;
-		}
-
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view) {
 			new Notice('No active editor. Please open a note.');
@@ -302,6 +290,8 @@ export default class AzureTTSPlugin extends Plugin {
 		let textToRead = '';
 
 		const selection = editor.getSelection();
+
+		// Get text to read based on selection or cursor
 		if (selection) {
 			// If text is selected, read from the start of selection to the end of the document
 			const startIndex = fullText.indexOf(selection);
@@ -312,6 +302,28 @@ export default class AzureTTSPlugin extends Plugin {
 			textToRead = fullText.substring(cursorOffset);
 		}
 
+		// Smart behavior when already playing native TTS
+		if (this.isNativePlaying && this.currentUtterance) {
+			// If there's a new selection or different text, cancel and start new
+			if (textToRead.trim() && textToRead !== this.currentText) {
+				// New selection detected - restart with new text
+				this.stopReading();
+				this.startReading(textToRead);
+				return;
+			}
+
+			// Same text - toggle pause/resume
+			if (window.speechSynthesis.paused) {
+				window.speechSynthesis.resume();
+				new Notice('Resumed');
+			} else if (window.speechSynthesis.speaking) {
+				window.speechSynthesis.pause();
+				new Notice('Paused');
+			}
+			return;
+		}
+
+		// Not currently playing - start reading
 		if (textToRead.trim()) {
 			this.startReading(textToRead);
 		} else {

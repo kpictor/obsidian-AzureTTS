@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-azure-tts",
 	"version": "1.5.0",
-	"description": "Obsidian plugin for Azure Text-to-Speech.",
+	"description": "TTS plugin with native iOS support, lock screen controls, and offline capability. Choose between Azure premium voices or free native TTS.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

@@ -138,7 +138,6 @@ class AudioControlModal extends Modal {
 				this.plugin.settings.playbackRate = value;
 				this.plugin.saveSettings();
 				if (this.rateDisplay) this.rateDisplay.setText(`${value.toFixed(1)}x`);
-				// Note: Can't change rate during playback, will apply to next utterance
 			});
 
 			// Pitch control
@@ -162,11 +161,22 @@ class AudioControlModal extends Modal {
 				this.plugin.settings.pitch = value;
 				this.plugin.saveSettings();
 				if (this.pitchDisplay) this.pitchDisplay.setText(`${value.toFixed(1)}x`);
-				// Note: Can't change pitch during playback, will apply to next utterance
 			});
 
+			// Restart button for applying changes
+			const restartButton = slidersContainer.createEl('button', {
+				text: '🔄 Apply Changes',
+				cls: 'mod-cta apply-changes-btn'
+			});
+			restartButton.onclick = () => {
+				if (this.plugin.currentText) {
+					window.speechSynthesis.cancel();
+					setTimeout(() => this.plugin.startNativeTTS(this.plugin.currentText), 100);
+				}
+			};
+
 			contentEl.createEl('p', {
-				text: '💡 Speed & pitch changes apply to next playback',
+				text: '🎚️ Adjust sliders then click Apply to restart with new settings',
 				cls: 'setting-item-description',
 				attr: { style: 'text-align: center; margin-top: 10px; font-size: 0.9em;' }
 			});
@@ -206,6 +216,7 @@ export default class AzureTTSPlugin extends Plugin {
 	private currentAudioUrl: string | null = null;
 	private currentUtterance: SpeechSynthesisUtterance | null = null;
 	private isNativePlaying: boolean = false;
+	public currentText: string = ''; // Public for modal instant restart
 
 	async onload() {
 		await this.loadSettings();
@@ -215,6 +226,9 @@ export default class AzureTTSPlugin extends Plugin {
 
 		// Add the settings tab
 		this.addSettingTab(new AzureTTSSettingTab(this.app, this));
+
+		// Setup Media Session API for lock screen controls
+		this.setupMediaSession();
 	}
 
 	onunload() {
@@ -227,6 +241,41 @@ export default class AzureTTSPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+	}
+
+	setupMediaSession() {
+		// Setup Media Session API for lock screen controls (iOS/Mac)
+		if ('mediaSession' in navigator) {
+			navigator.mediaSession.setActionHandler('play', () => {
+				if (this.isNativePlaying && window.speechSynthesis.paused) {
+					window.speechSynthesis.resume();
+				} else if (this.audio && this.audio.paused) {
+					this.audio.play();
+				}
+			});
+
+			navigator.mediaSession.setActionHandler('pause', () => {
+				if (this.isNativePlaying && window.speechSynthesis.speaking) {
+					window.speechSynthesis.pause();
+				} else if (this.audio && !this.audio.paused) {
+					this.audio.pause();
+				}
+			});
+
+			navigator.mediaSession.setActionHandler('stop', () => {
+				this.stopReading();
+			});
+		}
+	}
+
+	updateMediaSessionMetadata(title: string = 'Text-to-Speech') {
+		if ('mediaSession' in navigator) {
+			navigator.mediaSession.metadata = new MediaMetadata({
+				title: title,
+				artist: 'Obsidian Azure TTS',
+				album: 'Text-to-Speech',
+			});
+		}
 	}
 
 	triggerReading() {
@@ -390,6 +439,9 @@ export default class AzureTTSPlugin extends Plugin {
 		}
 
 		try {
+			// Save text for instant restart on speed/pitch change
+			this.currentText = text;
+
 			new Notice('Starting native speech...');
 
 			this.currentUtterance = new SpeechSynthesisUtterance(text);
@@ -405,7 +457,10 @@ export default class AzureTTSPlugin extends Plugin {
 
 			// Apply playback settings
 			this.currentUtterance.rate = this.settings.playbackRate; // 0.5 to 2.0
-			this.currentUtterance.pitch = this.settings.pitch; // 0.5 to 2.0	}
+			this.currentUtterance.pitch = this.settings.pitch; // 0.5 to 2.0
+
+			// Update media session for lock screen controls
+			this.updateMediaSessionMetadata('Reading with Native TTS');
 
 			// Event handlers
 			this.currentUtterance.onstart = () => {

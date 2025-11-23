@@ -20,6 +20,8 @@ interface AzureTTSSettings {
 	voiceName: string;
 	ttsEngine: 'azure' | 'native';
 	nativeVoice: string;
+	playbackRate: number; // 0.5 to 2.0 (for native TTS)
+	pitch: number; // 0.5 to 2.0 (for native TTS)
 }
 
 // Default settings
@@ -28,7 +30,9 @@ const DEFAULT_SETTINGS: AzureTTSSettings = {
 	serviceRegion: 'eastasia',
 	voiceName: 'zh-CN-XiaoxiaoNeural',
 	ttsEngine: Platform.isMobile ? 'native' : 'azure', // Default to native on mobile
-	nativeVoice: ''
+	nativeVoice: '',
+	playbackRate: 1.0, // Normal speed
+	pitch: 1.0 // Normal pitch
 }
 
 // Helper function to convert ArrayBuffer to base64
@@ -43,13 +47,21 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 // Modal for mobile audio controls
 class AudioControlModal extends Modal {
-	private audio: HTMLAudioElement;
+	private audio: HTMLAudioElement | null = null;
+	private utterance: SpeechSynthesisUtterance | null = null;
 	private playPauseButton: HTMLButtonElement;
 	private onStopCallback: () => void;
+	private plugin: AzureTTSPlugin;
+	private rateSlider: HTMLInputElement | null = null;
+	private pitchSlider: HTMLInputElement | null = null;
+	private rateDisplay: HTMLElement | null = null;
+	private pitchDisplay: HTMLElement | null = null;
 
-	constructor(app: App, audio: HTMLAudioElement, onStopCallback: () => void) {
+	constructor(app: App, plugin: AzureTTSPlugin, audio: HTMLAudioElement | null, utterance: SpeechSynthesisUtterance | null, onStopCallback: () => void) {
 		super(app);
+		this.plugin = plugin;
 		this.audio = audio;
+		this.utterance = utterance;
 		this.onStopCallback = onStopCallback;
 	}
 
@@ -64,14 +76,30 @@ class AudioControlModal extends Modal {
 
 		// Play/Pause button
 		this.playPauseButton = controlsContainer.createEl('button', {
-			text: 'Pause',
+			text: this.utterance ?
+				(window.speechSynthesis.paused ? 'Resume' : 'Pause') :
+				'Pause',
 			cls: 'mod-cta'
 		});
 		this.playPauseButton.onclick = () => {
-			if (this.audio.paused) {
-				this.audio.play();
-			} else {
-				this.audio.pause();
+			if (this.utterance) {
+				// Native TTS
+				if (window.speechSynthesis.paused) {
+					window.speechSynthesis.resume();
+					this.playPauseButton.setText('Pause');
+				} else if (window.speechSynthesis.speaking) {
+					window.speechSynthesis.pause();
+					this.playPauseButton.setText('Resume');
+				}
+			} else if (this.audio) {
+				// Azure TTS
+				if (this.audio.paused) {
+					this.audio.play();
+					this.playPauseButton.setText('Pause');
+				} else {
+					this.audio.pause();
+					this.playPauseButton.setText('Resume');
+				}
 			}
 		};
 
@@ -85,20 +113,81 @@ class AudioControlModal extends Modal {
 			this.close();
 		};
 
+		// Live controls for native TTS
+		if (this.utterance) {
+			const slidersContainer = contentEl.createDiv({ cls: 'tts-sliders' });
+
+			// Speed control
+			const speedContainer = slidersContainer.createDiv({ cls: 'slider-container' });
+			speedContainer.createEl('label', { text: 'Speed: ' });
+			this.rateDisplay = speedContainer.createEl('span', {
+				text: `${this.plugin.settings.playbackRate.toFixed(1)}x`,
+				cls: 'slider-value'
+			});
+			this.rateSlider = speedContainer.createEl('input', {
+				type: 'range',
+				attr: {
+					min: '0.5',
+					max: '2.0',
+					step: '0.1',
+					value: this.plugin.settings.playbackRate.toString()
+				}
+			});
+			this.rateSlider.addEventListener('input', (e) => {
+				const value = parseFloat((e.target as HTMLInputElement).value);
+				this.plugin.settings.playbackRate = value;
+				this.plugin.saveSettings();
+				if (this.rateDisplay) this.rateDisplay.setText(`${value.toFixed(1)}x`);
+				// Note: Can't change rate during playback, will apply to next utterance
+			});
+
+			// Pitch control
+			const pitchContainer = slidersContainer.createDiv({ cls: 'slider-container' });
+			pitchContainer.createEl('label', { text: 'Pitch: ' });
+			this.pitchDisplay = pitchContainer.createEl('span', {
+				text: `${this.plugin.settings.pitch.toFixed(1)}x`,
+				cls: 'slider-value'
+			});
+			this.pitchSlider = pitchContainer.createEl('input', {
+				type: 'range',
+				attr: {
+					min: '0.5',
+					max: '2.0',
+					step: '0.1',
+					value: this.plugin.settings.pitch.toString()
+				}
+			});
+			this.pitchSlider.addEventListener('input', (e) => {
+				const value = parseFloat((e.target as HTMLInputElement).value);
+				this.plugin.settings.pitch = value;
+				this.plugin.saveSettings();
+				if (this.pitchDisplay) this.pitchDisplay.setText(`${value.toFixed(1)}x`);
+				// Note: Can't change pitch during playback, will apply to next utterance
+			});
+
+			contentEl.createEl('p', {
+				text: '💡 Speed & pitch changes apply to next playback',
+				cls: 'setting-item-description',
+				attr: { style: 'text-align: center; margin-top: 10px; font-size: 0.9em;' }
+			});
+		}
+
 		// Update button text based on audio state
-		this.audio.onplay = () => {
-			if (this.playPauseButton) this.playPauseButton.setText('Pause');
-		};
+		if (this.audio) {
+			this.audio.onplay = () => {
+				if (this.playPauseButton) this.playPauseButton.setText('Pause');
+			};
 
-		this.audio.onpause = () => {
-			if (this.playPauseButton) this.playPauseButton.setText('Resume');
-		};
+			this.audio.onpause = () => {
+				if (this.playPauseButton) this.playPauseButton.setText('Resume');
+			};
 
-		this.audio.onended = () => {
-			this.onStopCallback();
-			this.close();
-			new Notice('Finished reading.');
-		};
+			this.audio.onended = () => {
+				this.onStopCallback();
+				this.close();
+				new Notice('Finished reading.');
+			};
+		}
 	}
 
 	onClose() {
@@ -273,11 +362,11 @@ export default class AzureTTSPlugin extends Plugin {
 	}
 
 	setupMobileControls() {
-		if (!this.audio) return;
-
 		this.audioControlModal = new AudioControlModal(
 			this.app,
+			this,
 			this.audio,
+			this.currentUtterance,
 			() => this.stopReading()
 		);
 		this.audioControlModal.open();
@@ -313,6 +402,10 @@ export default class AzureTTSPlugin extends Plugin {
 					this.currentUtterance.voice = selectedVoice;
 				}
 			}
+
+			// Apply playback settings
+			this.currentUtterance.rate = this.settings.playbackRate; // 0.5 to 2.0
+			this.currentUtterance.pitch = this.settings.pitch; // 0.5 to 2.0	}
 
 			// Event handlers
 			this.currentUtterance.onstart = () => {
@@ -554,10 +647,34 @@ class AzureTTSSettingTab extends PluginSettingTab {
 				.addDropdown(dropdown => {
 					dropdown.addOption('', 'Default Voice');
 
-					// Load available voices
-					const voices = window.speechSynthesis.getVoices();
-					voices.forEach(voice => {
-						dropdown.addOption(voice.name, `${voice.name} (${voice.lang})`);
+					// Trigger voice loading (important for iOS)
+					let voices = window.speechSynthesis.getVoices();
+
+					// If voices haven't loaded yet, wait for them
+					if (voices.length === 0) {
+						window.speechSynthesis.onvoiceschanged = () => {
+							voices = window.speechSynthesis.getVoices();
+							this.display(); // Refresh when voices are loaded
+						};
+					}
+
+					// Sort voices: Chinese first, then by language
+					const sortedVoices = voices.sort((a, b) => {
+						const aIsChinese = a.lang.startsWith('zh');
+						const bIsChinese = b.lang.startsWith('zh');
+
+						if (aIsChinese && !bIsChinese) return -1;
+						if (!aIsChinese && bIsChinese) return 1;
+
+						// Within same language category, sort by name
+						return a.name.localeCompare(b.name);
+					});
+
+					sortedVoices.forEach(voice => {
+						// Enhanced voice labels showing quality
+						const quality = voice.name.includes('Premium') ? ' 👑' :
+							voice.name.includes('Enhanced') ? ' ✨' : '';
+						dropdown.addOption(voice.name, `${voice.name} (${voice.lang})${quality}`);
 					});
 
 					dropdown
@@ -579,6 +696,34 @@ class AzureTTSSettingTab extends PluginSettingTab {
 						window.speechSynthesis.getVoices();
 						setTimeout(() => this.display(), 100);
 					}));
+
+			// Playback Speed Control
+			new Setting(containerEl)
+				.setName('Playback Speed')
+				.setDesc(`Adjust reading speed (current: ${this.plugin.settings.playbackRate.toFixed(1)}x)`)
+				.addSlider(slider => slider
+					.setLimits(0.5, 2.0, 0.1)
+					.setValue(this.plugin.settings.playbackRate)
+					.onChange(async (value) => {
+						this.plugin.settings.playbackRate = value;
+						await this.plugin.saveSettings();
+						this.display(); // Refresh to update description
+					})
+					.setDynamicTooltip());
+
+			// Pitch Control
+			new Setting(containerEl)
+				.setName('Voice Pitch')
+				.setDesc(`Adjust voice pitch (current: ${this.plugin.settings.pitch.toFixed(1)}x)`)
+				.addSlider(slider => slider
+					.setLimits(0.5, 2.0, 0.1)
+					.setValue(this.plugin.settings.pitch)
+					.onChange(async (value) => {
+						this.plugin.settings.pitch = value;
+						await this.plugin.saveSettings();
+						this.display(); // Refresh to update description
+					})
+					.setDynamicTooltip());
 
 			containerEl.createEl('p', {
 				text: '💡 Native TTS uses your device\'s built-in voices. No internet or API key required!',

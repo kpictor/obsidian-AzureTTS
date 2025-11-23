@@ -22,6 +22,7 @@ If your plugin does not need CSS, delete this file.
     gap: 10px;
     justify-content: center;
     flex-wrap: wrap;
+    margin-bottom: 15px;
 }
 
 .azure-tts-modal .audio-controls button {
@@ -30,6 +31,61 @@ If your plugin does not need CSS, delete this file.
     /* Touch-friendly size for mobile */
     font-size: 16px;
     padding: 8px 16px;
+}
+
+/* Slider controls for native TTS */
+.tts-sliders {
+    margin-top: 15px;
+    padding: 10px;
+    background: var(--background-secondary);
+    border-radius: 8px;
+}
+
+.slider-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.slider-container label {
+    min-width: 60px;
+    font-weight: 500;
+}
+
+.slider-container .slider-value {
+    min-width: 45px;
+    text-align: right;
+    font-weight: 600;
+    color: var(--text-accent);
+}
+
+.slider-container input[type="range"] {
+    flex: 1;
+    height: 6px;
+    border-radius: 5px;
+    background: var(--background-modifier-border);
+    outline: none;
+    min-width: 150px;
+    cursor: pointer;
+}
+
+.slider-container input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+    cursor: pointer;
+}
+
+.slider-container input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+    cursor: pointer;
+    border: none;
 }
 
 /* Desktop status bar button styles */

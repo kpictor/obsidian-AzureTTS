@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-azure-tts",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"description": "Obsidian plugin for Azure Text-to-Speech.",
 	"main": "main.js",
 	"scripts": {

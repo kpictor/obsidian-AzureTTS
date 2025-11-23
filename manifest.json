@@ -1,9 +1,9 @@
 {
     "id": "azure-tts",
     "name": "Azure TTS",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "minAppVersion": "0.15.0",
-    "description": "Azure TTS with native browser/iOS TTS fallback. Works offline!",
+    "description": "TTS with live controls + iOS premium voices. Perfect offline!",
     "author": "kpictor",
     "authorUrl": "https://github.com/kpictor",
     "isDesktopOnly": false

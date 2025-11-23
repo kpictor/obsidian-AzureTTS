@@ -2,14 +2,19 @@
 
 This plugin integrates Microsoft Azure's Text-to-Speech service directly into Obsidian, allowing you to listen to your notes with high-quality neural voices.
 
+**✨ Now fully compatible with iOS/iPadOS!**
+
 ## Features
 
-- **One-Click Reading**: A convenient icon in the left-hand ribbon menu to start reading your notes.
+- **Cross-Platform Support**: Works seamlessly on Desktop, iOS, and iPadOS
+- **One-Click Reading**: A convenient icon in the ribbon menu to start reading your notes
 - **Intelligent Playback**:
-    - If you have text selected, playback will start from your selection and continue to the end of the note.
-    - If you have no text selected, playback will start from your current cursor position.
-- **Playback Controls**: A simple controller appears in the status bar during playback, allowing you to pause, resume, and stop the audio.
-- **Easy Voice Selection**: Validate your Azure credentials and fetch a list of available voices directly within the plugin's settings.
+    - If you have text selected, playback will start from your selection and continue to the end of the note
+    - If you have no text selected, playback will start from your current cursor position
+- **Platform-Optimized Controls**: 
+    - **Desktop**: Simple status bar controller with pause, resume, and stop buttons
+    - **Mobile/iOS**: Modal dialog with touch-friendly controls for better usability on mobile devices
+- **Easy Voice Selection**: Validate your Azure credentials and fetch a list of available voices directly within the plugin's settings
 
 ## How to Set Up
 
